@@ -1,4 +1,4 @@
-name: Deploy to Droplet  # Updated to fix Git safe directory issue
+name: Deploy to Droplet  # Using Docker Compose V2
 
 on:
   push:
