@@ -5,6 +5,15 @@ set -e
 
 echo "Starting deployment process..."
 
+# Check if Node.js is installed, if not install it
+if ! command -v node &> /dev/null; then
+  echo "Node.js not found, installing..."
+  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  apt-get install -y nodejs
+  echo "Node.js installed: $(node -v)"
+  echo "NPM installed: $(npm -v)"
+fi
+
 # Install dependencies if needed
 if [ ! -d "node_modules" ]; then
   echo "Installing dependencies..."
