@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  # Nginx Reverse Proxy
+  nginx:
+    build: ./nginx
+    ports:
+      - "80:80"
+      # - "443:443"  # Uncomment when adding SSL
+    depends_on:
+      - fastapi
+    volumes:
+      - ./frontend/dist:/usr/share/nginx/html
+      # For development, you can mount the entire frontend directory
+      # - ./frontend:/app
+      # - /app/node_modules
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # FastAPI Backend
+  fastapi:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - /app/__pycache__
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+    restart: unless-stopped
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

@@ -1,75 +1,90 @@
-# Nuxt Minimal Starter
+# MB Final Project
 
-Look at the [Nuxt documentation](https://nuxt.com/docs/getting-started/introduction) to learn more.
+A containerized web application with:
+- Frontend: Nuxt.js
+- Backend: FastAPI
+- Reverse Proxy: Nginx
+- Containerized with Docker
 
-## Setup
+## Prerequisites
 
-Make sure to install dependencies:
+- Docker
+- Docker Compose
+- Node.js (for frontend development)
+- Python 3.9+ (for backend development)
 
-```bash
-# npm
-npm install
+## Getting Started
 
-# pnpm
-pnpm install
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd mb-final
+   ```
 
-# yarn
-yarn install
+2. **Build and start the services**
+   ```bash
+   docker-compose up --build -d
+   ```
 
-# bun
-bun install
+3. **Access the application**
+   - Frontend: http://localhost
+   - Backend API: http://localhost/api
+   - API Health Check: http://localhost/api/health
+
+## Project Structure
+
+```
+.
+├── docker-compose.yml    # Defines all services
+├── nginx/                # Nginx configuration
+│   ├── Dockerfile
+│   └── nginx.conf
+├── backend/              # FastAPI application
+│   ├── Dockerfile
+│   ├── main.py
+│   └── requirements.txt
+└── frontend/             # Nuxt.js frontend
 ```
 
-## Development Server
+## Development
 
-Start the development server on `http://localhost:3000`:
+### Backend Development
+1. Navigate to the backend directory
+2. Install dependencies: `pip install -r requirements.txt`
+3. Run the development server: `uvicorn main:app --reload`
 
-```bash
-# npm
-npm run dev
+### Frontend Development
+1. Navigate to the frontend directory
+2. Install dependencies: `npm install`
+3. Run the development server: `npm run dev`
 
-# pnpm
-pnpm dev
+## Production Deployment
 
-# yarn
-yarn dev
+1. Build the frontend for production:
+   ```bash
+   cd frontend
+   npm run build
+   ```
 
-# bun
-bun run dev
+2. Start the containers in detached mode:
+   ```bash
+   docker-compose up --build -d
+   ```
+
+## Environment Variables
+
+Create a `.env` file in the root directory with the following variables:
+
+```env
+# Backend
+SECRET_KEY=your-secret-key
+DATABASE_URL=postgresql://user:password@db:5432/dbname
+
+# Frontend
+NODE_ENV=production
+API_BASE_URL=/api
 ```
 
-## Production
+## License
 
-Build the application for production:
-
-```bash
-# npm
-npm run build
-
-# pnpm
-pnpm build
-
-# yarn
-yarn build
-
-# bun
-bun run build
-```
-
-Locally preview production build:
-
-```bash
-# npm
-npm run preview
-
-# pnpm
-pnpm preview
-
-# yarn
-yarn preview
-
-# bun
-bun run preview
-```
-
-Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
+MIT
