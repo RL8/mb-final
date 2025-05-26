@@ -10,30 +10,10 @@ export default defineNuxtConfig({
     '@nuxt/scripts',
     '@nuxt/image',
     '@nuxt/icon',
-    // Temporarily disabled due to dependency issues
-    // '@nuxt/fonts',
+    '@nuxt/fonts',
     '@nuxt/eslint',
     '@vite-pwa/nuxt'
   ],
-  
-  // Configure directories
-  dir: {
-    layouts: 'frontend/layouts',
-    pages: 'frontend/pages',
-    components: 'frontend/components',
-  },
-  
-  // Auto-import composables from both directories
-  imports: {
-    dirs: ['composables', 'frontend/composables']
-  },
-  
-  // Specify the output directory for the build
-  nitro: {
-    output: {
-      dir: 'frontend/dist'
-    }
-  },
   
   // PWA Configuration
   pwa: {
@@ -68,7 +48,30 @@ export default defineNuxtConfig({
       ]
     },
     workbox: {
-      navigateFallback: '/'
+      navigateFallback: '/',
+      globPatterns: ['**/*.{js,css,html,png,svg,ico}'],
+      runtimeCaching: [
+        {
+          urlPattern: /^https:\/\/api\.mindbridge\.app\/.*$/,
+          handler: 'NetworkFirst',
+          options: {
+            cacheName: 'api-cache',
+            expiration: {
+              maxEntries: 100,
+              maxAgeSeconds: 60 * 60 * 24 // 1 day
+            }
+          }
+        }
+      ]
+    },
+    client: {
+      installPrompt: true,
+      periodicSyncForUpdates: 20 // check for updates every 20 minutes
+    },
+    devOptions: {
+      enabled: true,
+      suppressWarnings: false,
+      type: 'module'
     }
   }
 })

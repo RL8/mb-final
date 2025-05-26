@@ -32,7 +32,7 @@
 </template>
 
 <script setup>
-// useConversationStore is auto-imported from the composables directory
+import { useConversationStore } from '~/composables/useConversationStore';
 import { computed, onMounted } from 'vue';
 
 // Get conversation store
@@ -49,54 +49,61 @@ onMounted(async () => {
       method: 'POST',
       body: {
         message: 'start',
-        conversationId: null
+        conversation_id: null
       }
     });
     
-    // Process the response
-    if (response.conversationId) {
-      conversationStore.setConversationId(response.conversationId);
-    }
-    
+    // Process response
     if (response.message) {
       conversationStore.addMessage({
-        id: `msg_${Date.now()}`,
         content: response.message,
         sender: 'ai',
         timestamp: new Date()
       });
     }
     
-    // Handle any components or sideboard content in the response
-    if (response.components && response.components.length > 0) {
-      const component = response.components[0];
-      conversationStore.setActiveComponent(component.id, component);
+    // Set conversation ID if provided
+    if (response.conversation_id) {
+      conversationStore.setConversationId(response.conversation_id);
     }
     
-    if (response.sideboardContent) {
-      conversationStore.updateSideboard(
-        response.sideboardContent.id,
-        response.sideboardContent
-      );
-    }
   } catch (error) {
-    console.error('Error fetching initial greeting:', error);
-    // Display error message
-    conversationStore.addMessage({
-      id: `msg_${Date.now()}`,
-      content: 'Sorry, I encountered an error while starting our conversation. Please try again.',
-      sender: 'ai',
-      timestamp: new Date()
-    });
+    console.error('Error getting initial greeting:', error);
   }
 });
 </script>
 
 <style>
+/* Global styles */
+:root {
+  --primary-color: #4F46E5;
+  --primary-dark: #4338ca;
+  --text-color: #212529;
+  --text-light: #6c757d;
+  --bg-color: #f8f9fa;
+  --border-color: #dee2e6;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+  --radius-sm: 6px;
+  --radius-md: 12px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  color: var(--text-color);
+  background-color: var(--bg-color);
+  line-height: 1.5;
+}
+
 .app-container {
   display: flex;
   height: 100vh;
-  width: 100%;
   overflow: hidden;
 }
 
@@ -104,18 +111,36 @@ onMounted(async () => {
   flex: 1;
   display: flex;
   flex-direction: column;
+  height: 100%;
   overflow: hidden;
 }
 
 .app-header {
-  padding: 1rem;
-  background-color: #4F46E5;
-  color: white;
-  text-align: center;
+  padding: 16px 24px;
+  background-color: white;
+  border-bottom: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+  z-index: 10;
 }
 
 .app-header h1 {
-  margin: 0;
   font-size: 1.5rem;
+  color: var(--primary-color);
+  margin: 0;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .app-container {
+    flex-direction: column;
+  }
+  
+  .app-header {
+    padding: 12px 16px;
+  }
+  
+  .app-header h1 {
+    font-size: 1.2rem;
+  }
 }
 </style>
