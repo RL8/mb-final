@@ -19,8 +19,13 @@ jobs:
     - name: Add SSH key
       run: |
         mkdir -p ~/.ssh
+        chmod 700 ~/.ssh
+        # Write the key with proper newlines
         echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
         chmod 600 ~/.ssh/deploy_key
+        # Test key format
+        ssh-keygen -l -f ~/.ssh/deploy_key || echo "Key format check failed"
+        # Configure SSH
         echo -e "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile=/dev/null" > ~/.ssh/config
         
     - name: Deploy to Droplet
