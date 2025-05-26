@@ -1,74 +1,103 @@
 # MB Final Project
 
 A containerized web application with:
-- Frontend: Nuxt.js
-- Backend: FastAPI
-- Reverse Proxy: Nginx
+- Frontend: Nuxt.js (root directory)
+- Backend: FastAPI (`/backend` directory)
+- Reverse Proxy: Nginx (`/nginx` directory)
 - Containerized with Docker
 
 ## Prerequisites
 
-- Docker
-- Docker Compose
-- Node.js (for frontend development)
+- Docker and Docker Compose
+- Node.js 18+ (for frontend development)
 - Python 3.9+ (for backend development)
 
 ## Getting Started
 
 1. **Clone the repository**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/RL8/mb-final.git
    cd mb-final
    ```
 
-2. **Build and start the services**
+2. **Install frontend dependencies**
    ```bash
+   npm install
+   ```
+
+3. **Start the development environment**
+   ```bash
+   # Start all services with Docker Compose
    docker-compose up --build -d
    ```
 
-3. **Access the application**
+4. **Access the application**
    - Frontend: http://localhost
    - Backend API: http://localhost/api
    - API Health Check: http://localhost/api/health
+   - API Documentation: http://localhost/api/docs
 
 ## Project Structure
 
 ```
 .
-├── docker-compose.yml    # Defines all services
-├── nginx/                # Nginx configuration
+├── .nuxt/              # Generated Nuxt.js files (not in version control)
+├── node_modules/       # Frontend dependencies (not in version control)
+├── public/            # Static files served by Nuxt.js
+├── server/            # Nuxt.js server middleware
+├── backend/           # FastAPI application
+│   ├── main.py        # API endpoints
+│   ├── requirements.txt
 │   ├── Dockerfile
-│   └── nginx.conf
-├── backend/              # FastAPI application
-│   ├── Dockerfile
-│   ├── main.py
-│   └── requirements.txt
-└── frontend/             # Nuxt.js frontend
+│   └── README.md      # Backend documentation
+├── nginx/             # Nginx configuration
+│   ├── nginx.conf
+│   └── Dockerfile
+├── .gitignore
+├── app.vue           # Main Vue component
+├── nuxt.config.ts    # Nuxt configuration
+├── package.json      # Frontend dependencies
+└── README.md        # This file
 ```
 
 ## Development
 
 ### Backend Development
 1. Navigate to the backend directory
-2. Install dependencies: `pip install -r requirements.txt`
-3. Run the development server: `uvicorn main:app --reload`
+2. Create a virtual environment (recommended):
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: .\venv\Scripts\activate
+   ```
+3. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. Run the development server:
+   ```bash
+   uvicorn main:app --reload
+   ```
 
 ### Frontend Development
-1. Navigate to the frontend directory
-2. Install dependencies: `npm install`
-3. Run the development server: `npm run dev`
+1. Install dependencies (from project root):
+   ```bash
+   npm install
+   ```
+2. Run the development server:
+   ```bash
+   npm run dev
+   ```
 
 ## Production Deployment
 
-1. Build the frontend for production:
+1. Build the frontend:
    ```bash
-   cd frontend
    npm run build
    ```
 
-2. Start the containers in detached mode:
+2. Start the containers in production mode:
    ```bash
-   docker-compose up --build -d
+   docker-compose -f docker-compose.prod.yml up --build -d
    ```
 
 ## Environment Variables
