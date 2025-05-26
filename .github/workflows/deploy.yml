@@ -1,0 +1,40 @@
+name: Deploy to Droplet
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Install SSH key
+      uses: webfactory/ssh-agent@v0.8.0
+      with:
+        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+        
+    - name: Deploy to Droplet
+      run: |
+        # Create the remote directory if it doesn't exist
+        ssh -o StrictHostKeyChecking=no root@${{ secrets.DROPLET_IP}} "mkdir -p /opt/mb-final"
+          
+        # Copy files to the Droplet
+        rsync -avz -e "ssh -o StrictHostKeyChecking=no" \
+          --exclude='.git' \
+          --exclude='node_modules' \
+          --exclude='.nuxt' \
+          --exclude='.output' \
+          ./ root@${{ secrets.DROPLET_IP }}:/opt/mb-final/
+          
+        # Run the deployment script
+        ssh -o StrictHostKeyChecking=no root@${{ secrets.DROPLET_IP }} "cd /opt/mb-final && ./deploy.sh"
+      
+    - name: Verify deployment
+      run: |
+        echo "Deployment complete! Verifying..."
+        curl -s http://${{ secrets.DROPLET_IP }}/api/health || echo "Deployment verification failed"

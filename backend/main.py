@@ -1,11 +1,25 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional
+from pydantic import BaseModel, Field
+from typing import Optional, Dict, Any, List, Union
+import os
+import json
+import uuid
+from dotenv import load_dotenv
 
-app = FastAPI(title="MB Final API")
+# Load environment variables
+load_dotenv()
 
-# CORS Middleware
+# Import CrewAI components
+from crewai import Agent, Task, Crew
+from tools.contextual_input import ContextualInputModuleTool
+from tools.sideboard_display import SideboardDisplayTool
+from tasks.greeting_tasks import GreetingTasks
+from crew.greeting_crew import GreetingCrew
+
+app = FastAPI()
+
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -14,35 +28,133 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Sample data model
-class Item(BaseModel):
-    id: int
+# Pydantic models
+class ChatMessage(BaseModel):
+    message: str
+    conversation_id: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = {}
+
+class NameInput(BaseModel):
     name: str
-    description: Optional[str] = None
+    conversation_id: str
+    metadata: Optional[Dict[str, Any]] = {}
 
-# In-memory database
-items_db = [
-    {"id": 1, "name": "Item 1", "description": "First item"},
-    {"id": 2, "name": "Item 2", "description": "Second item"},
-]
+class UIComponentRequest(BaseModel):
+    component_type: str = Field(..., description="Type of component to trigger")
+    component_id: str = Field(..., description="Unique identifier for the component")
+    data: Dict[str, Any] = Field(default_factory=dict)
+    conversation_id: str
 
-# Health check endpoint
+class UIComponentResponse(BaseModel):
+    type: str
+    id: str
+    data: Dict[str, Any]
+
+# Initialize CrewAI components
+def create_greeting_agent():
+    # Initialize tools
+    input_tool = ContextualInputModuleTool()
+    sideboard_tool = SideboardDisplayTool()
+    
+    return Agent(
+        role="AI Concierge Greeter",
+        goal="Welcome users, collect their name, and provide assistance",
+        backstory="""You are a friendly AI that greets users, collects their name, 
+        and provides helpful assistance. You're warm, professional, and guide users 
+        through the initial interaction. When you need to show UI components, 
+        use the appropriate tool and provide a clear JSON response.""",
+        verbose=True,
+        tools=[input_tool, sideboard_tool],
+        allow_delegation=False
+    )
+
+# Initialize components
+greeting_agent = create_greeting_agent()
+greeting_tasks = GreetingTasks(greeting_agent)
+greeting_crew = GreetingCrew(greeting_agent, greeting_tasks)
+
+# In-memory store for conversation state and UI components
+conversation_states = {}
+ui_components = {}
+
+# API Endpoints
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
 
-# Get all items
-@app.get("/api/items", response_model=List[Item])
-async def read_items():
-    return items_db
+@app.post("/api/chat")
+async def chat(chat_data: ChatMessage):
+    try:
+        # Get or create conversation state
+        conversation_id = chat_data.conversation_id or str(uuid.uuid4())
+        if conversation_id not in conversation_states:
+            conversation_states[conversation_id] = {
+                "has_name": False, 
+                "name": None,
+                "metadata": chat_data.metadata or {}
+            }
+        
+        state = conversation_states[conversation_id]
+        
+        # Process the message with the crew
+        response = greeting_crew.process_chat(chat_data.message, state)
+        response["conversation_id"] = conversation_id
+        
+        return response
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-# Get item by ID
-@app.get("/api/items/{item_id}", response_model=Item)
-async def read_item(item_id: int):
-    for item in items_db:
-        if item["id"] == item_id:
-            return item
-    raise HTTPException(status_code=404, detail="Item not found")
+@app.post("/api/submit-name")
+async def submit_name(name_data: NameInput):
+    try:
+        if not name_data.conversation_id or name_data.conversation_id not in conversation_states:
+            raise HTTPException(status_code=400, detail="Invalid conversation ID")
+        
+        # Process the name with the crew
+        response = greeting_crew.process_name(
+            name_data.name, 
+            conversation_states[name_data.conversation_id]
+        )
+        response["conversation_id"] = name_data.conversation_id
+        
+        return response
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/ui/component-trigger")
+async def trigger_component(component_data: UIComponentRequest):
+    """
+    Endpoint for triggering UI components from the agent.
+    This is where CrewAI, via a tool, instructs the FastAPI app to send a specific UI component payload to the frontend.
+    """
+    try:
+        if not component_data.conversation_id or component_data.conversation_id not in conversation_states:
+            raise HTTPException(status_code=400, detail="Invalid conversation ID")
+        
+        # Store the component for future reference
+        component_id = f"{component_data.component_type}_{component_data.component_id}"
+        ui_components[component_id] = {
+            "type": component_data.component_type,
+            "id": component_id,
+            "data": component_data.data,
+            "conversation_id": component_data.conversation_id,
+            "timestamp": str(datetime.utcnow())
+        }
+        
+        # Return the component data
+        return {
+            "type": component_data.component_type.upper(),
+            "id": component_id,
+            "data": component_data.data
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Add datetime import at the top
+from datetime import datetime
 
 if __name__ == "__main__":
     import uvicorn
