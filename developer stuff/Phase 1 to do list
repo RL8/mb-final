@@ -1,0 +1,116 @@
+Okay, here's that information presented in a more helpful Markdown format:
+
+---
+
+## C. Frontend Development (Vue/Nuxt.js PWA) 🚀
+
+**(Estimated Time: 2-3 Days)**
+
+This phase focuses on building the user-facing progressive web application using Vue.js and Nuxt.js.
+
+### 1. Nuxt.js Project Initialization
+   -   Navigate to your `frontend/` directory.
+   -   Initialize a new Nuxt.js project: `npx nuxi init frontend-app` (or your preferred project name).
+   -   During setup, select/ensure the following are included:
+        * **Vue 3**
+        * **Nuxt 3**
+        * **TypeScript** (optional, but highly recommended for robustness)
+        * **ESLint** (for code linting)
+        * **Prettier** (for code formatting)
+   -   Configure `nuxt.config.ts` for PWA features. This includes setting up the web app manifest and a basic service worker.
+
+### 2. Core Chat UI Component 💬
+   -   Create a Vue component for the main chat interface (e.g., `ChatInterface.vue`).
+   -   **Display Messages:**
+        * Show messages from both the AI and the User.
+        * Apply distinct styling to differentiate AI and User messages.
+   -   **User Input:**
+        * Include a `textarea` for users to type their messages.
+        * Add a "Send" button.
+   -   Implement basic API call functionality to your backend endpoint (e.g., `/api/chat`).
+
+### 3. Sideboard UI Component 📋
+   -   Create a Vue component for the Sideboard panel (e.g., `SideboardPanel.vue`).
+   -   **Collapsible Functionality:**
+        * Implement CSS transitions to allow the panel to slide in and out smoothly.
+   -   **Active Display Area:**
+        * Create a designated area within the sideboard to display dynamic content.
+   -   **Sideboard History:**
+        * Implement a simple list to display "Sideboard History" (this can be initially empty).
+
+### 4. Contextual Input Module Component 📝
+   -   Create a generic and reusable Vue component (e.g., `ContextualInputModule.vue`).
+   -   This component should be capable of rendering different input types based on props or data passed to it.
+   -   **"Solemn Process" Behavior:**
+        * When active, this module should overlay the main chat input.
+        * Disable interactions with the main chat interface.
+        * Require explicit user action via "Save" or "Cancel" buttons to proceed.
+   -   **Initial Configuration:**
+        * Set it up to render a single text input field for capturing the user's name.
+   -   Implement an API call to `/api/submit-name` when the "Save" button is clicked.
+
+### 5. Dynamic UI Rendering Logic ✨
+   -   In your main chat component, add logic to interpret incoming API responses from your FastAPI backend.
+   -   **Conditional Rendering:**
+        * If the API response includes a `component_id` (e.g., `name_input`), render the `ContextualInputModuleComponent` with the provided data.
+        * If the API response includes a `sideboard_display_id`, update the content of the `SideboardUIComponent`'s active-display-area.
+
+### 6. Collapsible Exchange Unit (Basic) 🔄
+   -   Implement the visual structure for a single collapsible unit representing an exchange in the chat history.
+   -   For demonstration purposes, manually hardcode an initial AI greeting and subsequent user/AI messages into a single exchange.
+   -   Include a miniature view or summary of the Sideboard content relevant to this exchange within the unit.
+
+---
+
+## D. Integration & "Hello World" Flow Execution 🌐
+
+**(Estimated Time: 1 Day)**
+
+This phase involves connecting the frontend and backend to achieve a basic end-to-end "Hello World" interaction.
+
+### 1. Orchestrate Initial Flow
+   1.  **PWA Load:** When the Progressive Web App loads, the frontend can either send an initial "start chat" signal, or the backend can proactively send the first AI message.
+   2.  **User "Hello":** User types "Hello" into the chat input. This message is sent to the FastAPI backend, which then routes it to the CrewAI `GreetingAgent`.
+   3.  **Name Input Trigger:** The `GreetingAgent` processes the "Hello" and triggers the `ContextualInputModuleTool`, configured for name input. The backend signals the frontend to display this module.
+   4.  **User Enters Name:** The user enters their name via the `ContextualInputModule` on the frontend. This name is sent via an API call (e.g., `/api/submit-name`) to FastAPI, which passes it to the `GreetingAgent`.
+   5.  **Sideboard Update Trigger:** The `GreetingAgent` processes the name and triggers the `SideboardDisplayTool` to show a welcome message in the Sideboard. The backend signals the frontend to update the Sideboard.
+   6.  **Chat History Update:** The `ConversationManagerAgent` (or the `GreetingAgent` in this minimal setup) updates its internal state to create and store the single `Collapsible Exchange Unit` representing this initial interaction in the chat history. The frontend reflects this update.
+
+### 2. Manual Testing ✅
+   -   Verify the PWA loads correctly in a mobile browser.
+   -   Confirm that chat messages (user to AI, AI to user) are exchanged successfully.
+   -   Ensure the `ContextualInputModule` appears for name input, allows text entry, and disappears after submission or cancellation.
+   -   Check that the Sideboard displays the dynamically updated content (e.g., the welcome message).
+   -   Verify that the single `Collapsible Exchange Unit` is correctly rendered in the chat history.
+
+---
+
+## E. CI/CD Pipeline (Basic Implementation) ⚙️
+
+**(Estimated Time: 1 Day)**
+
+Set up a basic Continuous Integration/Continuous Deployment pipeline to automate testing and deployment.
+
+### 1. Configure GitHub Actions (or your chosen CI/CD tool)
+
+   **a. Backend Workflow (`backend/`)**
+      -   Create a workflow file (e.g., `.github/workflows/backend-ci.yml`).
+      -   Define jobs for:
+          * **Python Dependency Installation:** `pip install -r requirements.txt` (or similar).
+          * **Linting:** Run tools like `flake8` and `black --check`.
+          * **Testing:** Execute basic tests using `pytest`.
+      -   **Docker Build & Push:** On a successful Pull Request merge to the `main` branch:
+          * Build a Docker image for the backend.
+          * Push the image to your DigitalOcean Container Registry.
+
+   **b. Frontend Workflow (`frontend/`)**
+      -   Create a workflow file (e.g., `.github/workflows/frontend-ci.yml`).
+      -   Define jobs for:
+          * **Node.js Dependency Installation:** `npm install` or `yarn install`.
+          * **Linting:** Run tools like `eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix` and `prettier --check .`.
+          * **Testing:** Execute basic frontend tests using `vitest` or `jest`.
+      -   **Build & Deploy PWA:**
+          * Build the Nuxt.js PWA: `npm run build`.
+          * Deploy the static assets (from the `.output/public` directory for Nuxt 3) to an Nginx-served directory on your Droplet (e.g., using `rsync` over SSH).
+
+---
