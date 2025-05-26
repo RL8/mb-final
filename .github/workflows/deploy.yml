@@ -1,4 +1,4 @@
-name: Deploy to Droplet
+name: Deploy to Droplet  # Updated to fix Git safe directory issue
 
 on:
   push:
