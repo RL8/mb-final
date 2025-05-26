@@ -7,8 +7,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
+# Install pip-tools
+RUN pip install --no-cache-dir pip-tools
+
+# Copy requirements.in file
+COPY requirements.in .
+
+# Generate requirements.txt with pip-tools
+RUN pip-compile --generate-hashes --output-file=requirements.txt requirements.in
+
 # Install Python dependencies
-COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
