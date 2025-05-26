@@ -13,21 +13,23 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
       
-    - name: Add SSH key
-      uses: webfactory/ssh-agent@v0.8.0
-      with:
-        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-        
     - name: Install rsync
       run: sudo apt-get update && sudo apt-get install -y rsync
+        
+    - name: Add SSH key
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+        chmod 600 ~/.ssh/deploy_key
+        echo -e "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile=/dev/null" > ~/.ssh/config
         
     - name: Deploy to Droplet
       run: |
         # Ensure the remote directory exists
-        ssh -o StrictHostKeyChecking=no root@${{ secrets.DROPLET_IP }} "mkdir -p /opt/mb-final"
+        ssh -i ~/.ssh/deploy_key root@${{ secrets.DROPLET_IP }} "mkdir -p /opt/mb-final"
         
         # Copy files to the Droplet
-        rsync -avz -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
+        rsync -avz -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
           --exclude='.git' \
           --exclude='node_modules' \
           --exclude='.nuxt' \
@@ -36,9 +38,11 @@ jobs:
           ./ root@${{ secrets.DROPLET_IP }}:/opt/mb-final/
           
         # Make deploy script executable and run it
-        ssh -o StrictHostKeyChecking=no root@${{ secrets.DROPLET_IP }} "cd /opt/mb-final && \
+        ssh -i ~/.ssh/deploy_key root@${{ secrets.DROPLET_IP}} "
+          cd /opt/mb-final && \
           chmod +x deploy.sh && \
-          ./deploy.sh"
+          ./deploy.sh
+        "
       
     - name: Verify deployment
       run: |
