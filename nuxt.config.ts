@@ -28,6 +28,13 @@ export default defineNuxtConfig({
     dirs: ['composables', 'frontend/composables']
   },
   
+  // Specify the output directory for the build
+  nitro: {
+    output: {
+      dir: 'frontend/dist'
+    }
+  },
+  
   // PWA Configuration
   pwa: {
     registerType: 'autoUpdate',
