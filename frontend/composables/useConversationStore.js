@@ -50,6 +50,7 @@ export const useConversationStore = () => {
   };
 
   const setActiveComponent = (componentId, data = {}) => {
+    console.log('Setting active component:', componentId, data);
     activeComponent.value = {
       id: componentId,
       type: data.type || 'contextual_input',
@@ -62,6 +63,8 @@ export const useConversationStore = () => {
   };
 
   const updateSideboard = (displayId, data) => {
+    console.log('Updating sideboard:', displayId, data);
+    
     // Create sideboard content
     const sideboardContent = {
       id: displayId,
@@ -85,7 +88,10 @@ export const useConversationStore = () => {
     const lastExchange = exchanges.value[exchanges.value.length - 1];
     if (lastExchange) {
       lastExchange.sideboardContent = sideboardContent;
+      console.log('Associated sideboard content with exchange:', lastExchange.id);
     }
+    
+    return sideboardContent;
   };
 
   const setActiveSideboardContent = (content) => {

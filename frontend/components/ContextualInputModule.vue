@@ -203,23 +203,36 @@ const save = async () => {
   isSaving.value = true;
   
   try {
+    console.log('Saving input:', props.componentId);
+    
     // Prepare data for submission
     const submissionData = {
       [props.inputType === 'checkbox' ? 'values' : 'value']: 
         props.inputType === 'checkbox' ? checkboxValues.value : inputValue.value,
       component_id: props.componentId,
-      conversation_id: conversationStore.conversationId
+      conversation_id: conversationStore.conversationId,
+      metadata: {
+        timestamp: new Date().toISOString(),
+        input_type: props.inputType
+      }
     };
     
     // For the name input specifically
     if (props.componentId === 'name_input') {
+      console.log('Submitting name:', inputValue.value);
+      
       const response = await $fetch('/api/submit-name', {
         method: 'POST',
         body: {
           name: inputValue.value,
-          conversation_id: conversationStore.conversationId
+          conversation_id: conversationStore.conversationId,
+          metadata: {
+            timestamp: new Date().toISOString()
+          }
         }
       });
+      
+      console.log('Name submission response:', response);
       
       // Process response
       if (response.message) {
@@ -232,10 +245,13 @@ const save = async () => {
       
       // Handle sideboard updates if present
       if (response.sideboard_display_id) {
-        conversationStore.updateSideboard(response.sideboard_display_id, response.sideboard_data);
+        console.log('Updating sideboard from name submission:', response.sideboard_display_id);
+        conversationStore.updateSideboard(response.sideboard_display_id, response.sideboard_data || {});
       }
     } else {
       // Generic component submission
+      console.log('Generic component submission:', submissionData);
+      
       const response = await $fetch('/api/ui/component-submit', {
         method: 'POST',
         body: submissionData
@@ -243,6 +259,20 @@ const save = async () => {
       
       // Process response as needed
       console.log('Component submission response:', response);
+      
+      // Add AI response to conversation if present
+      if (response.message) {
+        conversationStore.addMessage({
+          content: response.message,
+          sender: 'ai',
+          timestamp: new Date()
+        });
+      }
+      
+      // Handle sideboard updates if present
+      if (response.sideboard_display_id) {
+        conversationStore.updateSideboard(response.sideboard_display_id, response.sideboard_data || {});
+      }
     }
     
     // Clear the active component

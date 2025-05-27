@@ -68,14 +68,26 @@ const sendMessage = async () => {
   isAiTyping.value = true;
   
   try {
+    console.log('Sending message to API:', sentMessage);
+    
     // Send message to API
     const response = await $fetch('/api/chat', {
       method: 'POST',
       body: {
         message: sentMessage,
-        conversation_id: conversationId.value
+        conversation_id: conversationId.value,
+        metadata: {
+          timestamp: new Date().toISOString(),
+          client_info: {
+            platform: navigator.platform,
+            userAgent: navigator.userAgent,
+            language: navigator.language
+          }
+        }
       }
     });
+    
+    console.log('API response:', response);
     
     // Process response
     isAiTyping.value = false;
@@ -91,15 +103,18 @@ const sendMessage = async () => {
     
     // Handle UI component triggers if present
     if (response.component_id) {
-      conversationStore.setActiveComponent(response.component_id, response.data);
-      if (response.component_type === 'contextual_input') {
+      console.log('Activating component:', response.component_id);
+      conversationStore.setActiveComponent(response.component_id, response.data || {});
+      if (response.component_type === 'contextual_input' || 
+          (response.data && response.data.type === 'contextual_input')) {
         inputDisabled.value = true;
       }
     }
     
     // Handle sideboard updates if present
     if (response.sideboard_display_id) {
-      conversationStore.updateSideboard(response.sideboard_display_id, response.sideboard_data);
+      console.log('Updating sideboard:', response.sideboard_display_id);
+      conversationStore.updateSideboard(response.sideboard_display_id, response.sideboard_data || {});
     }
     
     // Update conversation ID if provided

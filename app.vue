@@ -44,14 +44,25 @@ const activeComponent = computed(() => conversationStore.activeComponent);
 // Initial greeting when app loads
 onMounted(async () => {
   try {
+    console.log('Initializing conversation...');
+    
     // Call the API to get initial greeting
     const response = await $fetch('/api/chat', {
       method: 'POST',
       body: {
         message: 'start',
-        conversation_id: null
+        conversation_id: null,
+        metadata: {
+          client_info: {
+            platform: navigator.platform,
+            userAgent: navigator.userAgent,
+            language: navigator.language
+          }
+        }
       }
     });
+    
+    console.log('Initial API response:', response);
     
     // Process response
     if (response.message) {
@@ -65,6 +76,16 @@ onMounted(async () => {
     // Set conversation ID if provided
     if (response.conversation_id) {
       conversationStore.setConversationId(response.conversation_id);
+    }
+    
+    // Handle UI component triggers if present
+    if (response.component_id) {
+      conversationStore.setActiveComponent(response.component_id, response.data || {});
+    }
+    
+    // Handle sideboard updates if present
+    if (response.sideboard_display_id) {
+      conversationStore.updateSideboard(response.sideboard_display_id, response.sideboard_data || {});
     }
     
   } catch (error) {
