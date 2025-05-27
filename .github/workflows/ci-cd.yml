@@ -212,81 +212,49 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          echo -e "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile=/dev/null" > ~/.ssh/config
+          echo -e "Host *\n\tStrictHostKeyChecking no" > ~/.ssh/config
       
       - name: Install rsync
         run: sudo apt-get update && sudo apt-get install -y rsync
       
-      - name: Deploy infrastructure files
-        if: ${{ needs.determine-changes.outputs.infra == 'true' }}
+      - name: Sync files to server
         run: |
-          # Ensure the remote directory exists
-          ssh -i ~/.ssh/id_rsa root@${{ secrets.DROPLET_IP }} "mkdir -p /opt/mb-final"
+          # Create necessary directories on the server
+          ssh -i ~/.ssh/id_rsa root@${{ secrets.DROPLET_IP }} "
+            mkdir -p /opt/mb-final/nginx
+            mkdir -p /var/www/mindbridge
+          "
           
-          # Copy configuration files to the Droplet
+          # Sync all necessary files using rsync with exclusions
           rsync -avz -e "ssh -i ~/.ssh/id_rsa" \
-            --include='docker-compose.yml' \
-            --include='nginx/' \
-            --include='nginx/**' \
-            --include='deploy.sh' \
-            --include='setup_droplet.sh' \
-            --exclude='*' \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='node_modules' \
+            --exclude='.env*' \
+            --exclude='.output' \
+            --exclude='.nuxt' \
+            --exclude='.vscode' \
             ./ root@${{ secrets.DROPLET_IP }}:/opt/mb-final/
           
-          # Make scripts executable
-          ssh -i ~/.ssh/id_rsa root@${{ secrets.DROPLET_IP }} "
-            cd /opt/mb-final && \
-            chmod +x deploy.sh && \
-            chmod +x setup_droplet.sh
-          "
+          # If frontend was built, sync the output directory
+          if [ -d ".output/public" ]; then
+            rsync -avz -e "ssh -i ~/.ssh/id_rsa" \
+              .output/public/ \
+              root@${{ secrets.DROPLET_IP }}:/opt/mb-final/.output/public/
+          fi
       
-      - name: Deploy backend
-        if: ${{ needs.determine-changes.outputs.backend == 'true' }}
+      - name: Run deployment script
         run: |
+          # Make the deploy script executable and run it
           ssh -i ~/.ssh/id_rsa root@${{ secrets.DROPLET_IP }} "
-            cd /opt/mb-final && \
-            docker pull registry.digitalocean.com/mindbridge/backend:latest && \
-            docker-compose up -d backend
+            cd /opt/mb-final
+            chmod +x deploy.sh
+            ./deploy.sh
           "
-      
-      - name: Deploy frontend
-        if: ${{ needs.determine-changes.outputs.frontend == 'true' }}
-        run: |
-          # Create the directory on the server if it doesn't exist
-          ssh -i ~/.ssh/id_rsa root@${{ secrets.DROPLET_IP }} "mkdir -p /var/www/mindbridge"
-          
-          # Copy the built files to the server
-          rsync -avz --delete -e "ssh -i ~/.ssh/id_rsa" \
-            .output/public/ \
-            root@${{ secrets.DROPLET_IP }}:/var/www/mindbridge/
-          
-          # Update Nginx configuration if needed
-          ssh -i ~/.ssh/id_rsa root@${{ secrets.DROPLET_IP }} "bash -c 'if [ ! -f /etc/nginx/sites-available/mindbridge ]; then
-            cat > /etc/nginx/sites-available/mindbridge << EOF
-server {
-    listen 80;
-    server_name _;
-    # Frontend
-    location / {
-        root /var/www/mindbridge;
-        index index.html;
-        try_files \\\$uri \\\$uri/ /index.html;
-    }
-    # API
-    location /api {
-        proxy_pass http://localhost:8000;
-        proxy_set_header Host \\\$host;
-        proxy_set_header X-Real-IP \\\$remote_addr;
-        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \\\$scheme;
-    }
-}
-EOF
-            ln -sf /etc/nginx/sites-available/mindbridge /etc/nginx/sites-enabled/
-            nginx -t && systemctl reload nginx
-          fi'"
       
       - name: Verify deployment
         run: |
-          echo "Deployment complete! Verifying..."
-          curl -s http://${{ secrets.DROPLET_IP }}/api/health || echo "API health check failed, may need to wait for backend to fully initialize"
+          echo "✅ Deployment complete! Verifying..."
+          # Give services a moment to start
+          sleep 10
+          curl -s http://${{ secrets.DROPLET_IP }}/api/health || echo "⚠️ API health check failed, may need to wait for backend to fully initialize"

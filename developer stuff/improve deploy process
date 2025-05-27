@@ -1,0 +1,177 @@
+Step 1: Create Your Nginx Configuration File in Your Repository
+
+Create the Nginx file:
+In your project repository, create a file named (for example) nginx/mindbridge.conf.
+Paste your desired Nginx configuration into this file. Based on your previous heredoc, it would be:
+
+Nginx
+
+# nginx/mindbridge.conf
+server {
+    listen 80;
+    server_name _; # Or your actual domain
+
+    # Frontend
+    location / {
+        root /var/www/mindbridge;
+        index index.html;
+        try_files $uri $uri/ /index.html;
+    }
+
+    # API
+    location /api {
+        proxy_pass http://localhost:8000; # Assuming your backend runs on port 8000
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+Make sure the $uri, $host, etc., are literal $ signs (Nginx variables), not shell variables.
+
+Commit this file to your repository.
+
+Step 2: Update/Create Your deploy.sh Script in Your Repository
+
+This script will be copied to your server and run there. It will perform the actual deployment actions.
+
+Edit or create deploy.sh in your repository:
+
+Bash
+
+#!/bin/bash
+set -e # Exit immediately if a command exits with a non-zero status.
+
+echo "Starting deployment process on server..."
+
+# Define base directory
+BASE_DIR="/opt/mb-final"
+NGINX_CONFIG_SOURCE="$BASE_DIR/nginx/mindbridge.conf"
+NGINX_SITES_AVAILABLE="/etc/nginx/sites-available/mindbridge"
+NGINX_SITES_ENABLED="/etc/nginx/sites-enabled/mindbridge"
+FRONTEND_PUBLIC_SOURCE="$BASE_DIR/.output/public" # Assuming .output/public is rsynced here
+FRONTEND_WEB_ROOT="/var/www/mindbridge"
+
+# --- Backend Deployment ---
+if [ -f "$BASE_DIR/docker-compose.yml" ]; then
+    echo "Deploying backend..."
+    cd "$BASE_DIR"
+    docker pull registry.digitalocean.com/mindbridge/backend:latest # Or use specific tag like $GITHUB_SHA if passed
+    docker-compose up -d backend # Assuming 'backend' is your service name
+    echo "Backend deployment attempted."
+else
+    echo "docker-compose.yml not found in $BASE_DIR. Skipping backend deployment."
+fi
+
+# --- Frontend Static Files Deployment ---
+if [ -d "$FRONTEND_PUBLIC_SOURCE" ]; then
+    echo "Deploying frontend static files..."
+    mkdir -p "$FRONTEND_WEB_ROOT"
+    # Using rsync to ensure atomicity and clean deletes
+    rsync -avz --delete "$FRONTEND_PUBLIC_SOURCE/" "$FRONTEND_WEB_ROOT/" # Note trailing slash on source
+    echo "Frontend static files deployed."
+else
+    echo "Frontend source directory $FRONTEND_PUBLIC_SOURCE not found. Skipping frontend static deployment."
+fi
+
+# --- Nginx Configuration ---
+if [ -f "$NGINX_CONFIG_SOURCE" ]; then
+    echo "Updating Nginx configuration..."
+    # Copy the new config file
+    cp "$NGINX_CONFIG_SOURCE" "$NGINX_SITES_AVAILABLE"
+
+    # Ensure the symlink exists in sites-enabled
+    if [ ! -L "$NGINX_SITES_ENABLED" ] || [ "$(readlink -f "$NGINX_SITES_ENABLED")" != "$NGINX_SITES_AVAILABLE" ]; then
+        ln -sfn "$NGINX_SITES_AVAILABLE" "$NGINX_SITES_ENABLED"
+        echo "Nginx symlink created/updated."
+    fi
+
+    # Test Nginx configuration and reload
+    nginx -t
+    if systemctl is-active --quiet nginx; then
+        systemctl reload nginx
+        echo "Nginx reloaded."
+    else
+        systemctl start nginx
+        echo "Nginx started."
+    fi
+else
+    echo "Nginx config $NGINX_CONFIG_SOURCE not found. Skipping Nginx update."
+fi
+
+echo "Deployment script finished."
+Commit this deploy.sh script to your repository. Make sure it's executable (git update-index --chmod=+x deploy.sh if needed before committing).
+
+Step 3: Simplify Your .github/workflows/ci-cd.yml deploy Job
+
+Modify the deploy job in your .github/workflows/ci-cd.yml file:
+
+YAML
+
+  deploy:
+    needs: [determine-changes, backend-build-deploy, frontend-build-deploy]
+    # Keep your 'if' condition:
+    if: ${{ always() && needs.determine-changes.outputs.any_change == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Restore frontend build cache # If frontend files are built in a previous job
+        if: ${{ needs.determine-changes.outputs.frontend == 'true' }}
+        uses: actions/cache@v3
+        with:
+          path: .output # Path to the built frontend assets
+          key: ${{ runner.os }}-nuxt-build-${{ github.sha }}
+          # Add restore-keys if you used them in the caching step
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          echo -e "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile=/dev/null" > ~/.ssh/config
+
+      - name: Install rsync
+        run: sudo apt-get update && sudo apt-get install -y rsync
+
+      - name: Sync files to server
+        run: |
+          rsync -avz --delete -e "ssh -i ~/.ssh/id_rsa" \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='backend/' \ # Assuming backend runs from Docker image, source not needed on host
+            --exclude='frontend/' \ # Assuming frontend source not needed, only build output
+            # Add any other necessary excludes
+            ./ root@${{ secrets.DROPLET_IP }}:/opt/mb-final/
+          
+          # Specifically sync built frontend if it's in .output and separate from root
+          if [ -d .output/public ]; then
+            rsync -avz --delete -e "ssh -i ~/.ssh/id_rsa" \
+              .output/public/ root@${{ secrets.DROPLET_IP }}:/opt/mb-final/.output/public/
+          fi
+
+      - name: Execute deployment script on server
+        run: |
+          ssh -i ~/.ssh/id_rsa root@${{ secrets.DROPLET_IP }} "cd /opt/mb-final && chmod +x deploy.sh && ./deploy.sh"
+
+      - name: Verify deployment
+        run: |
+          echo "Deployment complete! Verifying..."
+          # Give services a moment to start
+          sleep 15 
+          curl -s http://${{ secrets.DROPLET_IP }}/api/health || echo "API health check failed."
+          # Add a frontend check if possible, e.g., curl http://${{ secrets.DROPLET_IP }} | grep -q "My App Title"
+Explanation of Changes in ci-cd.yml:
+
+The complex multi-line run step that created the Nginx config via heredoc is gone.
+The individual conditional deployment steps for infra, backend, and frontend are largely moved into deploy.sh.
+A new Sync files to server step uses rsync to copy your project root (excluding .git, .github, potentially source code like backend/ and frontend/ if they are not needed directly on the server host because they run in Docker or only build outputs are needed). It includes docker-compose.yml, deploy.sh, and your nginx/mindbridge.conf.
+It then specifically rsyncs the built frontend from .output/public if it exists. Adjust this if your build output is elsewhere.
+The "Execute deployment script on server" step simply runs the deploy.sh you just copied over.
+The conditional logic for what to deploy (backend, frontend, infra changes) can now be handled more granularly inside deploy.sh by checking for the presence of key files or by passing parameters to it (though the example deploy.sh above checks for file presence).
+Before Pushing:
+
+Ensure nginx/mindbridge.conf exists with the correct content.
+Ensure deploy.sh is in your repository root, contains the script above (adjusted for your paths if needed), and is marked as executable.
+Update ci-cd.yml with the simplified deploy job.
