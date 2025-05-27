@@ -261,9 +261,8 @@ jobs:
             root@${{ secrets.DROPLET_IP }}:/var/www/mindbridge/
           
           # Update Nginx configuration if needed
-          ssh -i ~/.ssh/id_rsa root@${{ secrets.DROPLET_IP }} "
-            if [ ! -f /etc/nginx/sites-available/mindbridge ]; then
-              cat > /etc/nginx/sites-available/mindbridge << 'EOL'
+          ssh -i ~/.ssh/id_rsa root@${{ secrets.DROPLET_IP }} "bash -c 'if [ ! -f /etc/nginx/sites-available/mindbridge ]; then
+            cat > /etc/nginx/sites-available/mindbridge << EOF
 server {
     listen 80;
     server_name _;
@@ -284,11 +283,10 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
 }
-EOL
-              ln -sf /etc/nginx/sites-available/mindbridge /etc/nginx/sites-enabled/
-              nginx -t && systemctl reload nginx
-            fi
-          "
+EOF
+            ln -sf /etc/nginx/sites-available/mindbridge /etc/nginx/sites-enabled/
+            nginx -t && systemctl reload nginx
+          fi'"
       
       - name: Verify deployment
         run: |
