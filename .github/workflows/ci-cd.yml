@@ -261,7 +261,6 @@ jobs:
             root@${{ secrets.DROPLET_IP }}:/var/www/mindbridge/
           
           # Update Nginx configuration if needed
-          # Note the change in heredoc definition and termination
           ssh -i ~/.ssh/id_rsa root@${{ secrets.DROPLET_IP }} "bash -c 'if [ ! -f /etc/nginx/sites-available/mindbridge ]; then
             cat > /etc/nginx/sites-available/mindbridge << EOF
 server {
@@ -271,19 +270,18 @@ server {
     location / {
         root /var/www/mindbridge;
         index index.html;
-        try_files \\\$uri \\\$uri/ /index.html; # Escaped $ for shell within heredoc
+        try_files \\\$uri \\\$uri/ /index.html;
     }
     # API
     location /api {
         proxy_pass http://localhost:8000;
-        proxy_set_header Host \\\$host; # Escaped $
-        proxy_set_header X-Real-IP \\\$remote_addr; # Escaped $
-        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for; # Escaped $
-        proxy_set_header X-Forwarded-Proto \\\$scheme; # Escaped $
+        proxy_set_header Host \\\$host;
+        proxy_set_header X-Real-IP \\\$remote_addr;
+        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \\\$scheme;
     }
 }
 EOF
-            # Ensure the rest of the commands are outside the heredoc
             ln -sf /etc/nginx/sites-available/mindbridge /etc/nginx/sites-enabled/
             nginx -t && systemctl reload nginx
           fi'"
