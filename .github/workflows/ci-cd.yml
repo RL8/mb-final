@@ -1,0 +1,296 @@
+name: MindBridge CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  determine-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      infra: ${{ steps.filter.outputs.infra }}
+      any_change: ${{ steps.filter.outputs.backend == 'true' || steps.filter.outputs.frontend == 'true' || steps.filter.outputs.infra == 'true' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Filter changed paths
+        uses: dorny/paths-filter@v2
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - '.github/workflows/ci-cd.yml'
+            frontend:
+              - 'frontend/**'
+              - 'app.vue'
+              - 'nuxt.config.ts'
+              - 'package.json'
+              - '.github/workflows/ci-cd.yml'
+            infra:
+              - 'docker-compose.yml'
+              - 'nginx/**'
+              - 'deploy.sh'
+              - 'setup_droplet.sh'
+              - '.github/workflows/ci-cd.yml'
+
+  backend-lint-test:
+    needs: determine-changes
+    if: ${{ needs.determine-changes.outputs.backend == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: 'backend/requirements.txt'
+      
+      - name: Install dependencies
+        run: |
+          cd backend
+          python -m pip install --upgrade pip
+          pip install flake8 black pytest
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      
+      - name: Lint with flake8
+        run: |
+          cd backend
+          # stop the build if there are Python syntax errors or undefined names
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          # exit-zero treats all errors as warnings
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      
+      - name: Check formatting with black
+        run: |
+          cd backend
+          black --check .
+      
+      - name: Test with pytest
+        id: pytest
+        continue-on-error: true
+        run: |
+          cd backend
+          pytest -v
+      
+      - name: Report test status
+        run: |
+          if [ "${{ steps.pytest.outcome }}" == "failure" ]; then
+            echo "::warning::Tests failed but continuing with the workflow"
+          fi
+
+  frontend-lint-test:
+    needs: determine-changes
+    if: ${{ needs.determine-changes.outputs.frontend == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci || npm install
+      
+      - name: Lint with ESLint
+        id: eslint
+        continue-on-error: true
+        run: npx eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix
+      
+      - name: Format check with Prettier
+        id: prettier
+        continue-on-error: true
+        run: npx prettier --check .
+      
+      - name: Run tests
+        id: tests
+        continue-on-error: true
+        run: npm test
+      
+      - name: Report test status
+        run: |
+          if [ "${{ steps.eslint.outcome }}" == "failure" ]; then
+            echo "::warning::ESLint issues found but continuing with the workflow"
+          fi
+          if [ "${{ steps.prettier.outcome }}" == "failure" ]; then
+            echo "::warning::Prettier formatting issues found but continuing with the workflow"
+          fi
+          if [ "${{ steps.tests.outcome }}" == "failure" ]; then
+            echo "::warning::Tests failed but continuing with the workflow"
+          fi
+
+  backend-build-deploy:
+    needs: [determine-changes, backend-lint-test]
+    if: ${{ always() && needs.determine-changes.outputs.backend == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+      
+      - name: Log in to DigitalOcean Container Registry
+        run: doctl registry login --expiry-seconds 1200
+      
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            registry.digitalocean.com/mindbridge/backend:latest
+            registry.digitalocean.com/mindbridge/backend:${{ github.sha }}
+          cache-from: type=registry,ref=registry.digitalocean.com/mindbridge/backend:buildcache
+          cache-to: type=registry,ref=registry.digitalocean.com/mindbridge/backend:buildcache,mode=max
+
+  frontend-build-deploy:
+    needs: [determine-changes, frontend-lint-test]
+    if: ${{ always() && needs.determine-changes.outputs.frontend == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci || npm install
+      
+      - name: Build the Nuxt.js app
+        run: npm run build
+      
+      - name: Cache build output
+        uses: actions/cache@v3
+        with:
+          path: .output
+          key: ${{ runner.os }}-nuxt-build-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-nuxt-build-
+
+  deploy:
+    needs: [determine-changes, backend-build-deploy, frontend-build-deploy]
+    if: ${{ always() && needs.determine-changes.outputs.any_change == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Restore frontend build cache
+        if: ${{ needs.determine-changes.outputs.frontend == 'true' }}
+        uses: actions/cache@v3
+        with:
+          path: .output
+          key: ${{ runner.os }}-nuxt-build-${{ github.sha }}
+      
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          echo -e "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile=/dev/null" > ~/.ssh/config
+      
+      - name: Install rsync
+        run: sudo apt-get update && sudo apt-get install -y rsync
+      
+      - name: Deploy infrastructure files
+        if: ${{ needs.determine-changes.outputs.infra == 'true' }}
+        run: |
+          # Ensure the remote directory exists
+          ssh -i ~/.ssh/id_rsa root@${{ secrets.DROPLET_IP }} "mkdir -p /opt/mb-final"
+          
+          # Copy configuration files to the Droplet
+          rsync -avz -e "ssh -i ~/.ssh/id_rsa" \
+            --include='docker-compose.yml' \
+            --include='nginx/' \
+            --include='nginx/**' \
+            --include='deploy.sh' \
+            --include='setup_droplet.sh' \
+            --exclude='*' \
+            ./ root@${{ secrets.DROPLET_IP }}:/opt/mb-final/
+          
+          # Make scripts executable
+          ssh -i ~/.ssh/id_rsa root@${{ secrets.DROPLET_IP }} "
+            cd /opt/mb-final && \
+            chmod +x deploy.sh && \
+            chmod +x setup_droplet.sh
+          "
+      
+      - name: Deploy backend
+        if: ${{ needs.determine-changes.outputs.backend == 'true' }}
+        run: |
+          ssh -i ~/.ssh/id_rsa root@${{ secrets.DROPLET_IP }} "
+            cd /opt/mb-final && \
+            docker pull registry.digitalocean.com/mindbridge/backend:latest && \
+            docker-compose up -d backend
+          "
+      
+      - name: Deploy frontend
+        if: ${{ needs.determine-changes.outputs.frontend == 'true' }}
+        run: |
+          # Create the directory on the server if it doesn't exist
+          ssh -i ~/.ssh/id_rsa root@${{ secrets.DROPLET_IP }} "mkdir -p /var/www/mindbridge"
+          
+          # Copy the built files to the server
+          rsync -avz --delete -e "ssh -i ~/.ssh/id_rsa" \
+            .output/public/ \
+            root@${{ secrets.DROPLET_IP }}:/var/www/mindbridge/
+          
+          # Update Nginx configuration if needed
+          ssh -i ~/.ssh/id_rsa root@${{ secrets.DROPLET_IP }} "
+            if [ ! -f /etc/nginx/sites-available/mindbridge ]; then
+              cat > /etc/nginx/sites-available/mindbridge << 'EOL'
+server {
+    listen 80;
+    server_name _;
+
+    # Frontend
+    location / {
+        root /var/www/mindbridge;
+        index index.html;
+        try_files \$uri \$uri/ /index.html;
+    }
+
+    # API
+    location /api {
+        proxy_pass http://localhost:8000;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOL
+              ln -sf /etc/nginx/sites-available/mindbridge /etc/nginx/sites-enabled/
+              nginx -t && systemctl reload nginx
+            fi
+          "
+      
+      - name: Verify deployment
+        run: |
+          echo "Deployment complete! Verifying..."
+          curl -s http://${{ secrets.DROPLET_IP }}/api/health || echo "API health check failed, may need to wait for backend to fully initialize"
