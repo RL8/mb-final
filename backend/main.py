@@ -29,16 +29,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # Pydantic models
 class ChatMessage(BaseModel):
     message: str
     conversation_id: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
+
 class NameInput(BaseModel):
     name: str
     conversation_id: str
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
 
 class UIComponentRequest(BaseModel):
     component_type: str = Field(..., description="Type of component to trigger")
@@ -46,17 +49,19 @@ class UIComponentRequest(BaseModel):
     data: Dict[str, Any] = Field(default_factory=dict)
     conversation_id: str
 
+
 class UIComponentResponse(BaseModel):
     type: str
     id: str
     data: Dict[str, Any]
+
 
 # Initialize CrewAI components
 def create_greeting_agent():
     # Initialize tools
     input_tool = ContextualInputModuleTool()
     sideboard_tool = SideboardDisplayTool()
-    
+
     return Agent(
         role="AI Concierge Greeter",
         goal="Welcome users, collect their name, and provide assistance",
@@ -66,8 +71,9 @@ def create_greeting_agent():
         use the appropriate tool and provide a clear JSON response.""",
         verbose=True,
         tools=[input_tool, sideboard_tool],
-        allow_delegation=False
+        allow_delegation=False,
     )
+
 
 # Initialize components
 greeting_agent = create_greeting_agent()
@@ -78,10 +84,12 @@ greeting_crew = GreetingCrew(greeting_agent, greeting_tasks)
 conversation_states = {}
 ui_components = {}
 
+
 # API Endpoints
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
 
 @app.post("/api/chat")
 async def chat(chat_data: ChatMessage):
@@ -90,39 +98,43 @@ async def chat(chat_data: ChatMessage):
         conversation_id = chat_data.conversation_id or str(uuid.uuid4())
         if conversation_id not in conversation_states:
             conversation_states[conversation_id] = {
-                "has_name": False, 
+                "has_name": False,
                 "name": None,
-                "metadata": chat_data.metadata or {}
+                "metadata": chat_data.metadata or {},
             }
-        
+
         state = conversation_states[conversation_id]
-        
+
         # Process the message with the crew
         response = greeting_crew.process_chat(chat_data.message, state)
         response["conversation_id"] = conversation_id
-        
+
         return response
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/api/submit-name")
 async def submit_name(name_data: NameInput):
     try:
-        if not name_data.conversation_id or name_data.conversation_id not in conversation_states:
+        if (
+            not name_data.conversation_id
+            or name_data.conversation_id not in conversation_states
+        ):
             raise HTTPException(status_code=400, detail="Invalid conversation ID")
-        
+
         # Process the name with the crew
         response = greeting_crew.process_name(
-            name_data.name, 
-            conversation_states[name_data.conversation_id]
+            name_data.name, conversation_states[name_data.conversation_id]
         )
         response["conversation_id"] = name_data.conversation_id
-        
+
         return response
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/api/ui/component-trigger")
 async def trigger_component(component_data: UIComponentRequest):
@@ -131,9 +143,12 @@ async def trigger_component(component_data: UIComponentRequest):
     This is where CrewAI, via a tool, instructs the FastAPI app to send a specific UI component payload to the frontend.
     """
     try:
-        if not component_data.conversation_id or component_data.conversation_id not in conversation_states:
+        if (
+            not component_data.conversation_id
+            or component_data.conversation_id not in conversation_states
+        ):
             raise HTTPException(status_code=400, detail="Invalid conversation ID")
-        
+
         # Store the component for future reference
         component_id = f"{component_data.component_type}_{component_data.component_id}"
         ui_components[component_id] = {
@@ -141,22 +156,24 @@ async def trigger_component(component_data: UIComponentRequest):
             "id": component_id,
             "data": component_data.data,
             "conversation_id": component_data.conversation_id,
-            "timestamp": str(datetime.utcnow())
+            "timestamp": str(datetime.utcnow()),
         }
-        
+
         # Return the component data
         return {
             "type": component_data.component_type.upper(),
             "id": component_id,
-            "data": component_data.data
+            "data": component_data.data,
         }
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # Add datetime import at the top
 from datetime import datetime
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
