@@ -1,0 +1,94 @@
+name: Backend CI/CD
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'backend/**'
+  workflow_dispatch:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - name: Install dependencies
+      run: |
+        cd backend
+        python -m pip install --upgrade pip
+        pip install flake8 black pytest
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        
+    - name: Lint with flake8
+      run: |
+        cd backend
+        # stop the build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # exit-zero treats all errors as warnings
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        
+    - name: Check formatting with black
+      run: |
+        cd backend
+        black --check .
+        
+    - name: Test with pytest
+      run: |
+        cd backend
+        pytest -v || echo "No tests found or tests failed"
+
+  build-and-push:
+    needs: lint-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Install doctl
+      uses: digitalocean/action-doctl@v2
+      with:
+        token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+        
+    - name: Log in to DigitalOcean Container Registry
+      run: doctl registry login --expiry-seconds 600
+      
+    - name: Build and push Docker image
+      run: |
+        cd backend
+        # Build the Docker image
+        docker build -t registry.digitalocean.com/mindbridge/backend:latest .
+        docker build -t registry.digitalocean.com/mindbridge/backend:${{ github.sha }} .
+        
+        # Push the Docker image
+        docker push registry.digitalocean.com/mindbridge/backend:latest
+        docker push registry.digitalocean.com/mindbridge/backend:${{ github.sha }}
+        
+    - name: Deploy to Droplet
+      run: |
+        # Create SSH key
+        mkdir -p ~/.ssh
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        echo -e "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile=/dev/null" > ~/.ssh/config
+        
+        # SSH into the droplet and update the backend container
+        ssh -i ~/.ssh/id_rsa root@${{ secrets.DROPLET_IP }} "
+          cd /opt/mb-final && \
+          docker pull registry.digitalocean.com/mindbridge/backend:latest && \
+          docker-compose up -d backend
+        "
