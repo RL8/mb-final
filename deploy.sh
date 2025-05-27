@@ -96,40 +96,71 @@ if [ -f "$BASE_DIR/nginx/mindbridge.conf" ]; then
     [ -d "/etc/nginx/sites-available" ] && cp -r /etc/nginx/sites-available/ "$NGINX_BACKUP_DIR/"
     [ -d "/etc/nginx/sites-enabled" ] && cp -r /etc/nginx/sites-enabled/ "$NGINX_BACKUP_DIR/"
     
-    # Clean up old configs
+    # Clean up old configs - be more aggressive
     log "🧹 Cleaning up old Nginx configurations..."
-    rm -f /etc/nginx/sites-enabled/*
-    rm -f /etc/nginx/conf.d/*.conf
+    # Remove all symlinks in sites-enabled
+    find /etc/nginx/sites-enabled/ -type l -delete 2>/dev/null || true
+    # Remove all .conf files in conf.d
+    rm -f /etc/nginx/conf.d/*.conf 2>/dev/null || true
+    # Remove default config if it exists
+    [ -f "/etc/nginx/sites-available/default" ] && rm -f /etc/nginx/sites-available/default
+    [ -f "/etc/nginx/sites-enabled/default" ] && rm -f /etc/nginx/sites-enabled/default
     
-    # Create necessary directories
+    # Create necessary directories with correct permissions
     mkdir -p /etc/nginx/{sites-available,sites-enabled,conf.d}
+    chmod 755 /etc/nginx/{sites-available,sites-enabled,conf.d}
     
     # Deploy new config
     log "📋 Installing new Nginx configuration..."
+    # Only deploy to conf.d for simplicity
     cp "$BASE_DIR/nginx/mindbridge.conf" /etc/nginx/conf.d/mindbridge.conf
-    cp "$BASE_DIR/nginx/mindbridge.conf" /etc/nginx/sites-available/mindbridge
-    ln -sf /etc/nginx/sites-available/mindbridge /etc/nginx/sites-enabled/
+    chmod 644 /etc/nginx/conf.d/mindbridge.conf
     
     # Test configuration
     log "🔍 Testing Nginx configuration..."
-    if nginx -t; then
+    if nginx -t 2>>"$LOG_FILE"; then
         log "✅ Nginx configuration test passed"
         
-        # Reload Nginx
-        if systemctl reload nginx; then
-            log "🔄 Nginx reloaded successfully"
+        # Check if Nginx is running
+        if systemctl is-active --quiet nginx; then
+            log "🔄 Nginx is running, attempting to reload..."
+            if ! systemctl reload nginx 2>>"$LOG_FILE"; then
+                log "❌ Failed to reload Nginx"
+                systemctl status nginx --no-pager -l | tee -a "$LOG_FILE"
+                exit 1
+            fi
         else
-            log "❌ Failed to reload Nginx"
-            systemctl status nginx --no-pager | tee -a "$LOG_FILE"
+            log "🔄 Nginx is not running, attempting to start..."
+            if ! systemctl start nginx 2>>"$LOG_FILE"; then
+                log "❌ Failed to start Nginx"
+                systemctl status nginx --no-pager -l | tee -a "$LOG_FILE"
+                exit 1
+            fi
+        fi
+        
+        # Verify Nginx is running after start/reload
+        if systemctl is-active --quiet nginx; then
+            log "✅ Nginx is now active and running"
+            # Show listening ports to confirm Nginx is bound correctly
+            log "🌐 Nginx is listening on:"
+            ss -tulpn | grep nginx || true
+        else
+            log "❌ Nginx failed to start after configuration"
+            systemctl status nginx --no-pager -l | tee -a "$LOG_FILE"
             exit 1
         fi
     else
         log "❌ Nginx configuration test failed"
-        log "Current Nginx configuration files:"
-        find /etc/nginx -type f -name "*.conf" | while read -r conf; do
-            log "\n=== $conf ==="
-            cat "$conf" | tee -a "$LOG_FILE"
-        done
+        log "=== Nginx Configuration Test Output ==="
+        nginx -T 2>&1 | tee -a "$LOG_FILE"
+        log "=== End of Nginx Configuration Test Output ==="
+        
+        # Show the last 20 lines of the error log for more context
+        if [ -f "/var/log/nginx/error.log" ]; then
+            log "=== Last 20 lines of Nginx error log ==="
+            tail -n 20 /var/log/nginx/error.log | tee -a "$LOG_FILE"
+        fi
+        
         exit 1
     fi
 else

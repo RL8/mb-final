@@ -196,17 +196,23 @@ jobs:
     needs: [determine-changes, backend-build-deploy, frontend-build-deploy]
     if: ${{ always() && needs.determine-changes.outputs.any_change == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
+    env:
+      DEPLOY_LOG: "deploy-$(date +%Y%m%d-%H%M%S).log"
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
+      # Only restore frontend cache if frontend was built in this workflow
       - name: Restore frontend build cache
-        if: ${{ needs.determine-changes.outputs.frontend == 'true' }}
+        if: ${{ needs.frontend-build-deploy.conclusion == 'success' && needs.determine-changes.outputs.frontend == 'true' }}
         uses: actions/cache@v3
         with:
           path: .output
           key: ${{ runner.os }}-nuxt-build-${{ github.sha }}
-      
+          restore-keys: |
+            ${{ runner.os }}-nuxt-build-
+
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
@@ -214,18 +220,25 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           echo -e "Host *\n\tStrictHostKeyChecking no" > ~/.ssh/config
       
-      - name: Install rsync
-        run: sudo apt-get update && sudo apt-get install -y rsync
-      
-      - name: Sync files to server
+      - name: Install rsync and curl
         run: |
-          # Create necessary directories on the server
+          sudo apt-get update
+          sudo apt-get install -y rsync curl
+
+      - name: Prepare server directories
+        run: |
           ssh -i ~/.ssh/id_rsa root@${{ secrets.DROPLET_IP }} "
             mkdir -p /opt/mb-final/nginx
+            mkdir -p /opt/mb-final/.output/public
             mkdir -p /var/www/mindbridge
+            mkdir -p /var/log/mb-deploy
+            chmod -R 755 /opt/mb-final
+            chown -R root:root /opt/mb-final
           "
-          
-          # Sync all necessary files using rsync with exclusions
+
+      - name: Sync backend and configuration files
+        run: |
+          # First sync everything except the frontend build output
           rsync -avz -e "ssh -i ~/.ssh/id_rsa" \
             --exclude='.git' \
             --exclude='.github' \
@@ -235,26 +248,74 @@ jobs:
             --exclude='.nuxt' \
             --exclude='.vscode' \
             ./ root@${{ secrets.DROPLET_IP }}:/opt/mb-final/
-          
-          # If frontend was built, sync the output directory
+
+      # Only sync frontend if it was built
+      - name: Sync frontend build output
+        if: ${{ needs.frontend-build-deploy.conclusion == 'success' && needs.determine-changes.outputs.frontend == 'true' }}
+        run: |
           if [ -d ".output/public" ]; then
-            rsync -avz -e "ssh -i ~/.ssh/id_rsa" \
+            echo "🚀 Syncing frontend build output..."
+            rsync -avz --delete -e "ssh -i ~/.ssh/id_rsa" \
               .output/public/ \
               root@${{ secrets.DROPLET_IP }}:/opt/mb-final/.output/public/
+          else
+            echo "⚠️ No frontend build output found at .output/public/"
+            exit 1
           fi
-      
+
       - name: Run deployment script
         run: |
-          # Make the deploy script executable and run it
+          # Make the deploy script executable and run it with logging
           ssh -i ~/.ssh/id_rsa root@${{ secrets.DROPLET_IP }} "
             cd /opt/mb-final
             chmod +x deploy.sh
-            ./deploy.sh
+            # Run with nohup to prevent SSH connection drop from killing the process
+            nohup ./deploy.sh > /var/log/mb-deploy/$DEPLOY_LOG 2>&1 & disown
+            # Wait a bit for the script to start and capture the PID
+            sleep 5
+            # Follow the log file for a while to show progress
+            tail -f /var/log/mb-deploy/$DEPLOY_LOG &
+            TAIL_PID=$!
+            # Wait for deployment to complete or timeout after 5 minutes
+            timeout 300s tail --pid=$TAIL_PID -f /dev/null || echo "Deployment may still be running in background"
+            # Show the last 50 lines of the log
+            echo '\n=== Deployment Log (last 50 lines) ==='
+            tail -n 50 /var/log/mb-deploy/$DEPLOY_LOG || true
+            # Check if deployment completed successfully
+            if grep -q '✅ Deployment completed successfully' /var/log/mb-deploy/$DEPLOY_LOG; then
+              echo '✅ Deployment script completed successfully'
+              exit 0
+            else
+              echo '❌ Deployment script did not complete successfully'
+              exit 1
+            fi
           "
-      
+
       - name: Verify deployment
         run: |
-          echo "✅ Deployment complete! Verifying..."
+          echo "🔍 Verifying deployment..."
           # Give services a moment to start
           sleep 10
-          curl -s http://${{ secrets.DROPLET_IP }}/api/health || echo "⚠️ API health check failed, may need to wait for backend to fully initialize"
+          
+          # Check Nginx status
+          echo "\n=== Nginx Status ==="
+          ssh -i ~/.ssh/id_rsa root@${{ secrets.DROPLET_IP }} "systemctl status nginx --no-pager -l | head -n 20" || true
+          
+          # Check Docker containers
+          echo "\n=== Docker Containers ==="
+          ssh -i ~/.ssh/id_rsa root@${{ secrets.DROPLET_IP }} "docker ps -a" || true
+          
+          # Check API health
+          echo "\n=== API Health Check ==="
+          if ! curl -s -f http://${{ secrets.DROPLET_IP }}/api/health; then
+            echo "⚠️ API health check failed, checking logs..."
+            ssh -i ~/.ssh/id_rsa root@${{ secrets.DROPLET_IP }} "
+              echo '--- Nginx Error Log ---';
+              tail -n 20 /var/log/nginx/error.log 2>/dev/null || echo 'No Nginx error log found';
+              echo '\n--- Backend Logs ---';
+              docker logs mb-final-fastapi-1 --tail 50 2>&1 | head -n 50 || echo 'Could not retrieve backend logs';
+            "
+            exit 1
+          fi
+          
+          echo "\n✅ Deployment verification complete"
