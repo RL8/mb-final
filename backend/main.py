@@ -1,11 +1,12 @@
 from fastapi import FastAPI, HTTPException, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any, List, Union
+from typing import Optional, Dict, Any, List, Union, Annotated
 import os
 import json
 import uuid
 from dotenv import load_dotenv
+from datetime import datetime
 
 # Load environment variables
 load_dotenv()
@@ -32,12 +33,12 @@ app.add_middleware(
 class ChatMessage(BaseModel):
     message: str
     conversation_id: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = {}
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 class NameInput(BaseModel):
     name: str
     conversation_id: str
-    metadata: Optional[Dict[str, Any]] = {}
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 class UIComponentRequest(BaseModel):
     component_type: str = Field(..., description="Type of component to trigger")
